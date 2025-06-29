@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<strategy>
+  <name>Digit Tracker Dbot with Trading Insights</name>
+  <description>Digit Tracker bot compatible with the Digit Tracker Analysis Tool logic, including streak tracking and trade signals.</description>
+  <bot>
+    <variables>
+      <variable name="digit_history" type="array" default="[]"/>
+      <variable name="match_count" type="map" default="{}"/>
+      <variable name="match_streak" type="number" default="0"/>
+      <variable name="differ_streak" type="number" default="0"/>
+      <variable name="last_result" type="string" default=""/>
+      <variable name="most_predicted_digit" type="number" default="-1"/>
+      <variable name="trade_type" type="string" default="matches"/>
+      <variable name="selected_index" type="string" default="volatility_100"/>
+    </variables>
+
+    <inputs>
+      <input name="trade_type" type="dropdown" options="matches,even_odd,over_under" default="matches" />
+      <input name="selected_index" type="dropdown" options="volatility_10,volatility_25,volatility_50,volatility_75,volatility_100" default="volatility_100" />
+    </inputs>
+
+    <on_tick>
+      <script>
+        <![CDATA[
+          // Get the last digit from the tick
+          var tick_digit = bot.last_digit;  // 'digit' variable is accessible as 'bot.last_digit'
+
+          // Get history and counts from variables or initialize
+          var history = bot.getVariable('digit_history');
+          if (!history) history = [];
+          var counts = bot.getVariable('match_count');
+          if (!counts) counts = {};
+          else counts = JSON.parse(counts);
+
+          // Append current digit
+          history.push(tick_digit);
+
+          // Maintain max length 100
+          if (history.length > 100) {
+            var removed = history.shift();
+            counts[removed] = counts[removed] ? counts[removed] - 1 : 0;
+          }
+
+          // Update counts for current digit
+          counts[tick_digit] = counts[tick_digit] ? counts[tick_digit] + 1 : 1;
+
+          // Save back updated variables
+          bot.setVariable('digit_history', JSON.stringify(history));
+          bot.setVariable('match_count', JSON.stringify(counts));
+
+          // Calculate streaks (match/differ)
+          var last_result = bot.getVariable('last_result') || '';
+          var match_streak = parseInt(bot.getVariable('match_streak')) || 0;
+          var differ_streak = parseInt(bot.getVariable('differ_streak')) || 0;
+
+          if (history.length >= 2) {
+            var prev_digit = history[history.length - 2];
+            if (tick_digit === prev_digit) {
+              if (last_result === 'match') match_streak++;
+              else {
+                match_streak = 1;
+                differ_streak = 0;
+              }
+              last_result = 'match';
+            } else {
+              if (last_result === 'differ') differ_streak++;
+              else {
+                differ_streak = 1;
+                match_streak = 0;
+              }
+              last_result = 'differ';
+            }
+          } else {
+            // Not enough history yet
+            match_streak = 0;
+            differ_streak = 0;
+            last_result = '';
+          }
+
+          bot.setVariable('last_result', last_result);
+          bot.setVariable('match_streak', match_streak.toString());
+          bot.setVariable('differ_streak', differ_streak.toString());
+
+          // Find most predicted digit
+          var maxCount = -1;
+          var predictedDigit = -1;
+          for (var d in counts) {
+            if (counts[d] > maxCount) {
+              maxCount = counts[d];
+              predictedDigit = parseInt(d);
+            }
+          }
+          bot.setVariable('most_predicted_digit', predictedDigit);
+        ]]>
+      </script>
+    </on_tick>
+
+    <on_start>
+      <script>
+        <![CDATA[
+          // On start, get user inputs
+          var trade_type = bot.getInput('trade_type') || 'matches';
+          var selected_index = bot.getInput('selected_index') || 'volatility_100';
+          bot.setVariable('trade_type', trade_type);
+          bot.setVariable('selected_index', selected_index);
+        ]]>
+      </script>
+    </on_start>
+
+    <on_new_candle>
+      <!-- Can be used if you want to update or log per candle -->
+    </on_new_candle>
+
+    <trade>
+      <if condition="trade_type == 'matches'">
+        <purchase
+          contract_type="DIGITMATCH"
+          stake="1"
+          duration="5"
+          duration_unit="t"
+          digit="{{most_predicted_digit}}"
+        />
+      </if>
+
+      <!-- You can add logic here for other trade_types like even_odd, over_under -->
+    </trade>
+  </bot>
+</strategy>
